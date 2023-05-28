@@ -1,61 +1,113 @@
-const router = require('express').Router();
-const { User } = require('../../models');
+const express = require("express");
+const router = express.Router();
+const {User, Blog, Comment} = require("../../models/");
+const bcrypt  = require("bcrypt");
 
-router.post('/', async (req, res) => {
-  try {
-    const userData = await User.create(req.body);
+router.get("/", (req, res) => {
+    User.findAll({
+      include:[Blog, Comment]
+    })
+      .then(dbUsers => {
+        res.json(dbUsers);
+      })
+      .catch(err => {
+        console.log(err);
+        res.status(500).json({ msg: "an error occured", err });
+      });
+  });
 
-    req.session.save(() => {
-      req.session.user_id = userData.id;
-      req.session.logged_in = true;
+  // logout by hitting /api/users/logout
+router.get("/logout",(req,res)=>{
+    req.session.destroy();
+    res.redirect('/');
+})
 
-      res.status(200).json(userData);
-    });
-  } catch (err) {
-    res.status(400).json(err);
-  }
+router.get("/:id", (req, res) => {
+    User.findByPk(req.params.id,{include:[Blog, Comment]})
+      .then(dbUser => {
+        res.json(dbUser);
+      })
+      .catch(err => {
+        console.log(err);
+        res.status(500).json({ msg: "an error occured", err });
+      });
 });
 
-router.post('/login', async (req, res) => {
-  try {
-    const userData = await User.findOne({ where: { email: req.body.email } });
+// sign up api/users/
+router.post("/", (req, res) => {
+  // run hooks to hash and salt password; create user
+    User.create(req.body, {individualHooks: true} )
+      .then(newUser => {
+        // IMMEDIATE LOG IN = create new session for user with id and username (sessions set to 30 min)
+        req.session.user = {
+          id:newUser.id,
+          username:newUser.username
+        }
+        res.json(newUser);
+      })
+      .catch(err => {
+        console.log(err);
+        res.status(500).json({ msg: "an error occured", err });
+      });
+});
 
-    if (!userData) {
-      res
-        .status(400)
-        .json({ message: 'Incorrect email or password, please try again' });
-      return;
+// login api/users/login
+router.post("/login", (req, res) => {
+  // find username name that matches request
+    User.findOne({
+      where:{
+      username:req.body.username
     }
-
-    const validPassword = await userData.checkPassword(req.body.password);
-
-    if (!validPassword) {
-      res
-        .status(400)
-        .json({ message: 'Incorrect email or password, please try again' });
-      return;
-    }
-
-    req.session.save(() => {
-      req.session.user_id = userData.id;
-      req.session.logged_in = true;
-      
-      res.json({ user: userData, message: 'You are now logged in!' });
-    });
-
-  } catch (err) {
-    res.status(400).json(err);
-  }
+}).then(foundUser=>{
+  // if username is not found, send message
+      if(!foundUser){
+        return res.status(400).json({msg:"wrong login credentials"})
+      }
+      // compare password with saved hash
+      if(bcrypt.compareSync(req.body.password,foundUser.password)){
+        // if pw matches, create session for user 
+        req.session.user = {
+          id:foundUser.id,
+          username:foundUser.username
+        }
+        return res.json(foundUser)
+        // redirect page??
+      } else {
+        return res.status(400).json({msg:"wrong login credentials"})
+      }
+    }).catch(err => {
+        console.log(err);
+        res.status(500).json({ msg: "an error occured", err });
+      });
 });
-
-router.post('/logout', (req, res) => {
-  if (req.session.logged_in) {
-    req.session.destroy(() => {
-      res.status(204).end();
+  
+router.put("/:id", (req, res) => {
+    User.update(req.body, {
+      where: {
+        id: req.params.id
+      },
+      individualHooks: true
+    }).then(updatedUser => {
+      res.json(updatedUser);
+    })
+    .catch(err => {
+      console.log(err);
+      res.status(500).json({ msg: "an error occured", err });
     });
-  } else {
-    res.status(404).end();
-  }
 });
+  
+router.delete("/:id", (req, res) => {
+    User.destroy({
+      where: {
+        id: req.params.id
+      }
+    }).then(delUser => {
+      res.json(delUser);
+    })
+    .catch(err => {
+      console.log(err);
+      res.status(500).json({ msg: "an error occured", err });
+    });
+  });
 
 module.exports = router;

@@ -1,82 +1,66 @@
-const router = require('express').Router();
-const { Project, User } = require('../models');
-const withAuth = require('../utils/auth');
+const express = require('express');
+const router = express.Router();
+const {User,Blog, Comment} = require('../models');
 
-router.get('/', async (req, res) => {
-  try {
-    // Get all projects and JOIN with user data
-    const projectData = await Project.findAll({
-      include: [
-        {
-          model: User,
-          attributes: ['name'],
-        },
-      ],
-    });
 
-    // Serialize data so the template can read it
-    const projects = projectData.map((project) => project.get({ plain: true }));
+router.get('/', (req, res) => {
+    Blog.findAll({include: [User]}).then(blogs => {
+        const hbsBlogs = blogs.map(blog=>blog.get({plain:true}))
+        const loggedIn = req.session.user?true:false;
+        res.render('home', {blogs:hbsBlogs, loggedIn, username:req.session.user?.username})
+    })
+})
 
-    // Pass serialized data and session flag into template
-    res.render('homepage', { 
-      projects, 
-      logged_in: req.session.logged_in 
-    });
-  } catch (err) {
-    res.status(500).json(err);
-  }
-});
+router.get("/login",(req,res)=>{
+    if(req.session.user){
+        return res.redirect("/dashboard")
+    }
+    res.render("login")
+})
 
-router.get('/project/:id', async (req, res) => {
-  try {
-    const projectData = await Project.findByPk(req.params.id, {
-      include: [
-        {
-          model: User,
-          attributes: ['name'],
-        },
-      ],
-    });
+router.get("/signup",(req,res)=>{
+    res.render("signup")
+})
 
-    const project = projectData.get({ plain: true });
+router.get("/dashboard",(req,res)=>{
+    if(!req.session.user) {
+        return res.redirect('/login')
+    }
+    User.findByPk(req.session.user.id, {
+        include: [Blog, Comment]
+    }).then(userData => {
+        const hbsData = userData.get({plain:true})
+        hbsData.loggedIn = req.session.user?true:false
+        res.render("dashboard", hbsData)
+    })
+})
 
-    res.render('project', {
-      ...project,
-      logged_in: req.session.logged_in
-    });
-  } catch (err) {
-    res.status(500).json(err);
-  }
-});
+// SINGLE POST PAGE FUNCTION
+router.get("/blogs/:id", (req, res) =>{
+    if(!req.session.user) {
+        return res.redirect('/login')
+    }
+    Blog.findByPk(req.params.id,{include:[User, {model: Comment, include: [User]}]})
+    .then(dbBlog => {
+        const hbsBlog = dbBlog.get({plain:true})
+        const loggedIn = req.session.user?true:false;
+        console.log('==============')
+        console.log(hbsBlog)
+        if (dbBlog.userId != req.session.user.id) {
+// If not your post -> render comment page over homepage
+            return res.render('comment', {hbsBlog, loggedIn, username:req.session.user?.username})
+        }
+        // If your post -> render update/delete page over your dashboard
+        res.render("updateDelete", {hbsBlog, loggedIn, username:req.session.user?.username})
+      })
+      .catch(err => {
+        console.log(err);
+        res.status(500).json({ msg: "an error occured", err });
+      });
+})
 
-// Use withAuth middleware to prevent access to route
-router.get('/profile', withAuth, async (req, res) => {
-  try {
-    // Find the logged in user based on the session ID
-    const userData = await User.findByPk(req.session.user_id, {
-      attributes: { exclude: ['password'] },
-      include: [{ model: Project }],
-    });
-
-    const user = userData.get({ plain: true });
-
-    res.render('profile', {
-      ...user,
-      logged_in: true
-    });
-  } catch (err) {
-    res.status(500).json(err);
-  }
-});
-
-router.get('/login', (req, res) => {
-  // If the user is already logged in, redirect the request to another route
-  if (req.session.logged_in) {
-    res.redirect('/profile');
-    return;
-  }
-
-  res.render('login');
-});
+router.get("*",(req,res)=>{
+    res.redirect("/")
+})
 
 module.exports = router;
